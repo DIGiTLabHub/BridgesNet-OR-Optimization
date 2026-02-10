@@ -1,0 +1,11 @@
+name: bridgesnet
+channels:
+  - conda-forge
+  - https://conda.anaconda.org/gurobi
+dependencies:
+  - python=3.11
+  - gurobi
+  - networkx
+  - matplotlib
+  - numpy
+  - pytest
