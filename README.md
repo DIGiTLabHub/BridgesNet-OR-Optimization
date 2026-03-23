@@ -41,6 +41,52 @@ python scripts/visualize_graph.py --output results/network.pdf
 - `tests/`: unit tests
 - `Bridge_Sensitivity.ipynb`: original notebook
 
+## Create Missouri Bridge Network (interactive)
+
+Use the Missouri data workflow to build a directed bridge network from:
+- `Missouri-Bridges-Data-Graphs/missouri_bridge_graph.pkl`
+- `Missouri-Bridges-Data-Graphs/MOpoorbridges.xlsx`
+
+The script is interactive: it asks you to choose 1-2 counties, then configure 1-4 depots (county selection per depot, display name, and optional latitude/longitude overrides).
+
+Run with defaults:
+
+```bash
+python scripts/create_MO_bridge_network.py
+```
+
+Run with explicit output paths:
+
+```bash
+python scripts/create_MO_bridge_network.py \
+  --output-graph results/mo_network_custom.pkl \
+  --output-plot results/mo_network_custom.pdf
+```
+
+Show the plot in an interactive window (instead of headless-only save):
+
+```bash
+python scripts/create_MO_bridge_network.py --show
+```
+
+Options:
+- `--graph-file <path>`: source Missouri NetworkX pickle (default: `Missouri-Bridges-Data-Graphs/missouri_bridge_graph.pkl`)
+- `--workbook-file <path>`: source workbook (default: `Missouri-Bridges-Data-Graphs/MOpoorbridges.xlsx`)
+- `--output-graph <path>`: output directed network pickle (default: `results/mo_bridge_network.pkl`)
+- `--output-plot <path>`: output network PDF (default: `results/mo_bridge_network.pdf`)
+- `--show`: display the plot window after saving
+
+Interactive prompt flow (example):
+- `Available counties (select 1-2)`
+- `Enter county numbers or names (comma-separated, 1-2 values):`
+- `How many depots to add? (1-4):`
+- For each depot: county choice (if 2 counties selected), default county-seat-like name, name override prompt, latitude override prompt, longitude override prompt.
+
+Outputs:
+- Directed network pickle at `--output-graph`
+- Network visualization PDF at `--output-plot`
+- Console summary including selected counties, bridge node count, depot node count, directed edge count, and saved file paths
+
 ## Run the Analysis (single run)
 
 ```bash
