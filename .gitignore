@@ -10,3 +10,14 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# ASCE submission
+# Ignore contents but not the directory itself (so we can re-include specific files)
+ASCE_submission/*
+# Re-include the Figures subdirectory
+!ASCE_submission/Figures/
+# Keep the README-referenced figures trackable
+!ASCE_submission/Figures/Bridges Network.png
+!ASCE_submission/Figures/Routing Result.png
+!ASCE_submission/Figures/Pareto Frontier.png
+!ASCE_submission/Figures/Gantt Chart of Service Variation.png
