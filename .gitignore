@@ -16,6 +16,8 @@ __pycache__/
 ASCE_submission/*
 # Re-include the Figures subdirectory
 !ASCE_submission/Figures/
+# Ignore all figures by default
+ASCE_submission/Figures/*
 # Keep the README-referenced figures trackable
 !ASCE_submission/Figures/Bridges Network.png
 !ASCE_submission/Figures/Routing Result.png
