@@ -1,4 +1,4 @@
-# BridgesNet OR Optimization
+# BridgesNet Operational Resilience Optimization
 
 BridgesNet studies how to recover a damaged bridge network when repair capacity is limited, travel takes time, bridge conditions vary, and different intervention teams provide different levels of improvement at different costs. The repository is built for decision support: it turns a bridge-recovery problem into an exact optimization workflow that helps compare resilience gains against operational effort under realistic resource constraints.
 
