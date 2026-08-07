@@ -1,381 +1,312 @@
-"""Run parametric sensitivity studies and report summary results."""
+"""Run named manuscript sensitivity cases on one parameterized network."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-import itertools
+import json
+import os
 import sys
+import tempfile
+from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
-
-import matplotlib
+from typing import Any, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+MATPLOTLIB_CACHE = Path(tempfile.gettempdir()) / "bridgesnet-matplotlib-cache"
+MATPLOTLIB_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(MATPLOTLIB_CACHE))
+XDG_CACHE = Path(tempfile.gettempdir()) / "bridgesnet-xdg-cache"
+XDG_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("XDG_CACHE_HOME", str(XDG_CACHE))
+
+import matplotlib
+from gurobipy import GRB
 matplotlib.use("Agg")
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "Arial"
-
+matplotlib.rcParams["font.family"] = "DejaVu Sans"
 import matplotlib.pyplot as plt
-import numpy as np
-from gurobipy import GRB
 
 from bridgesnet.config import GraphConfig, TeamConfig
-from bridgesnet.graph import build_graph
+from bridgesnet.graph import build_graph, force_city_depots
 from bridgesnet.model import build_model
 from bridgesnet.paths import compute_shortest_paths
-from bridgesnet.results import extract_solution
+from bridgesnet.plots import plot_cumulative_profile, plot_gantt
+from bridgesnet.results import cumulative_profile, extract_solution
+from bridgesnet.scenarios import manuscript_scenarios
+from bridgesnet.solver import SolverConfig, runtime_metadata, solve_maximum_functionality
 
 
-DEFAULT_SWEEP = {
-    "alpha": [0.3, 0.5, 0.7],
-    "planning_horizon": [6, 8, 10],
-    "depot_bias": [0.7, 0.9],
-    "bridge_bfi_range": [(0.1, 0.3), (0.2, 0.4)],
-    "base_cost_scale": [0.8, 1.0, 1.2],
-    "delta_functionality_scale": [0.8, 1.0, 1.2],
-    "seed": [1, 2, 3],
-}
+TEAM_COLORS = {"RRU": "#4477AA", "ERT": "#EE6677", "CIRS": "#228833"}
+DEFAULT_SCENARIOS = (
+    "base",
+    "service_time_1_2_2",
+    "due_minus_1",
+    "initial_bfi_plus_0_10",
+)
 
 
-def save_figure(fig, output_dir: Path, name: str) -> None:
-    fig.savefig(output_dir / f"{name}.png", dpi=200)
-    fig.savefig(output_dir / f"{name}.pdf")
+def parse_range(value: str, cast=float) -> tuple[Any, Any]:
+    parts = value.split(":")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("Range must be formatted MIN:MAX")
+    try:
+        low, high = cast(parts[0]), cast(parts[1])
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Invalid range {value!r}") from exc
+    if low > high:
+        raise argparse.ArgumentTypeError("Range minimum cannot exceed maximum")
+    return low, high
 
 
-def _parse_float_list(value: str) -> List[float]:
-    return [float(item.strip()) for item in value.split(",") if item.strip()]
+def parse_scenarios(value: str) -> list[str]:
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    invalid = set(names) - set(DEFAULT_SCENARIOS)
+    if not names or invalid:
+        raise argparse.ArgumentTypeError(
+            f"Scenario names must be drawn from {', '.join(DEFAULT_SCENARIOS)}"
+        )
+    return names
 
 
-def _parse_int_list(value: str) -> List[int]:
-    return [int(item.strip()) for item in value.split(",") if item.strip()]
-
-
-def _parse_range_list(value: str) -> List[Tuple[float, float]]:
-    items = []
-    for token in value.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        parts = token.split(":")
-        if len(parts) != 2:
-            raise ValueError("Range list items must be formatted as low:high")
-        items.append((float(parts[0]), float(parts[1])))
-    return items
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Run parametric sensitivity analysis sweeps"
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("results") / "sensitivity",
-        help="Output folder for CSV and plots",
-    )
-    parser.add_argument(
-        "--cities", type=int, default=6, help="Number of cities"
-    )
-    parser.add_argument(
-        "--alpha",
-        type=_parse_float_list,
-        help="Comma-separated alpha values (default: 0.3,0.5,0.7)",
-    )
-    parser.add_argument(
-        "--planning-horizon",
-        type=_parse_int_list,
-        help="Comma-separated planning horizons (default: 6,8,10)",
-    )
-    parser.add_argument(
-        "--depot-bias",
-        type=_parse_float_list,
-        help="Comma-separated depot bias values (default: 0.7,0.9)",
-    )
-    parser.add_argument(
-        "--bridge-bfi-range",
-        type=_parse_range_list,
-        help="Comma-separated low:high pairs (default: 0.1:0.3,0.2:0.4)",
-    )
-    parser.add_argument(
-        "--base-cost-scale",
-        type=_parse_float_list,
-        help="Comma-separated base cost scales (default: 0.8,1.0,1.2)",
-    )
-    parser.add_argument(
-        "--delta-functionality-scale",
-        type=_parse_float_list,
-        help="Comma-separated delta functionality scales (default: 0.8,1.0,1.2)",
-    )
-    parser.add_argument(
-        "--seed",
-        type=_parse_int_list,
-        help="Comma-separated seeds (default: 1,2,3)",
-    )
-    return parser
-
-
-def _scaled_team_config(
-    base: TeamConfig, base_cost_scale: float, delta_scale: float, alpha: float
-) -> TeamConfig:
-    base_cost = {
-        team: value * base_cost_scale for team, value in base.base_cost.items()
-    }
-    delta_functionality = {
-        team: value * delta_scale
-        for team, value in base.delta_functionality.items()
-    }
-    return TeamConfig(
-        teams=list(base.teams),
-        base_cost=base_cost,
-        delta_functionality=delta_functionality,
-        service_time=dict(base.service_time),
-        alpha=alpha,
-    )
-
-
-def _write_csv(rows: List[Dict[str, float | int | str]], output_path: Path) -> None:
+def write_csv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
     if not rows:
         return
-    with output_path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]), extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
 
-def _group_mean(
-    rows: Iterable[Dict[str, float | int | str]],
-    key: str,
-    metric: str,
-) -> Tuple[List[str], List[float]]:
-    buckets: Dict[str, List[float]] = {}
-    for row in rows:
-        if row.get("status") != "optimal":
-            continue
-        bucket_key = str(row[key])
-        buckets.setdefault(bucket_key, []).append(float(row[metric]))
-
-    labels = list(buckets.keys())
-    values = [float(np.mean(buckets[label])) for label in labels]
-    return labels, values
+def save_figure(fig, output_dir: Path, name: str) -> None:
+    fig.savefig(output_dir / f"{name}.png", dpi=300, bbox_inches="tight")
+    fig.savefig(output_dir / f"{name}.pdf", bbox_inches="tight")
+    plt.close(fig)
 
 
-def _plot_metric_by_param(
-    rows: Iterable[Dict[str, float | int | str]],
-    param: str,
-    metric: str,
-    output_dir: Path,
-) -> None:
-    labels, values = _group_mean(rows, param, metric)
-    if not labels:
-        return
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(labels, values, marker="o")
-    ax.set_title(f"Mean {metric} vs {param}")
-    ax.set_xlabel(param)
-    ax.set_ylabel(metric)
-    ax.grid(True, linestyle="--", alpha=0.4)
-    fig.tight_layout()
-    save_figure(fig, output_dir, f"summary_{param}_{metric}")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the four named manuscript sensitivity cases on one generated "
+            "parameterized network"
+        )
+    )
+    parser.add_argument("--cities", type=int, default=6)
+    parser.add_argument("--seed", type=int, default=2)
+    parser.add_argument(
+        "--depots",
+        type=int,
+        help="Force C1 through CD to be depots; default preserves seeded selection",
+    )
+    parser.add_argument("--planning-horizon", type=int, default=8)
+    parser.add_argument("--depot-bias", type=float, default=0.90)
+    parser.add_argument(
+        "--bridge-count-range", type=lambda value: parse_range(value, int), default=(1, 1)
+    )
+    parser.add_argument("--bfi-range", type=parse_range, default=(0.2, 0.4))
+    parser.add_argument(
+        "--start-range", type=lambda value: parse_range(value, int), default=(0, 2)
+    )
+    parser.add_argument(
+        "--due-offset-range", type=lambda value: parse_range(value, int), default=(2, 5)
+    )
+    parser.add_argument(
+        "--scenarios", type=parse_scenarios, default=list(DEFAULT_SCENARIOS)
+    )
+    parser.add_argument("--time-limit", type=float, default=3600.0)
+    parser.add_argument("--mip-gap", type=float, default=1e-4)
+    parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--gurobi-seed", type=int, default=0)
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("results") / "sensitivity"
+    )
+    parser.add_argument(
+        "--model-stats-only",
+        action="store_true",
+        help="Build and record every case without calling optimize",
+    )
+    parser.add_argument("--write-lp", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
+    return parser
 
 
-def _plot_metric_histogram(
-    rows: Iterable[Dict[str, float | int | str]],
-    metric: str,
-    output_dir: Path,
-) -> None:
-    values = [
-        float(row[metric])
-        for row in rows
-        if row.get("status") == "optimal" and row.get(metric) not in ("", None)
-    ]
-    if not values:
-        return
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.hist(values, bins=12, color="steelblue", edgecolor="black", alpha=0.8)
-    ax.set_title(f"Histogram of {metric}")
-    ax.set_xlabel(metric)
-    ax.set_ylabel("Count")
-    ax.grid(True, linestyle="--", alpha=0.3)
-    fig.tight_layout()
-    save_figure(fig, output_dir, f"hist_{metric}")
+def _scenario_payload(scenario, graph_config: GraphConfig) -> dict[str, Any]:
+    return {
+        "name": scenario.name,
+        "description": scenario.description,
+        "graph_config": asdict(graph_config),
+        "team_config": asdict(scenario.team_config),
+        "nodes": [
+            {"id": str(node), "attributes": dict(scenario.graph.nodes[node])}
+            for node in scenario.graph.nodes
+        ],
+        "edges": [
+            {"source": str(source), "target": str(target), "attributes": dict(data)}
+            for source, target, data in scenario.graph.edges(data=True)
+        ],
+    }
 
 
-def _plot_metric_boxplot(
-    rows: Iterable[Dict[str, float | int | str]],
-    param: str,
-    metric: str,
-    output_dir: Path,
-) -> None:
-    buckets: Dict[str, List[float]] = {}
-    for row in rows:
-        if row.get("status") != "optimal":
-            continue
-        bucket_key = str(row[param])
-        buckets.setdefault(bucket_key, []).append(float(row[metric]))
-
-    if not buckets:
-        return
-    labels = list(buckets.keys())
-    data = [buckets[label] for label in labels]
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.boxplot(data, labels=labels, showmeans=True)
-    ax.set_title(f"{metric} by {param}")
-    ax.set_xlabel(param)
-    ax.set_ylabel(metric)
-    ax.grid(True, linestyle="--", alpha=0.3)
-    fig.tight_layout()
-    save_figure(fig, output_dir, f"box_{param}_{metric}")
-
-
-def main() -> None:
-    args = build_parser().parse_args()
-    output_dir: Path = args.output_dir
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.cities < 2:
+        raise ValueError("--cities must be at least 2")
+    if not 0 <= args.depot_bias <= 1:
+        raise ValueError("--depot-bias must be in [0, 1]")
+    output_dir = args.output_dir.resolve()
+    sentinel = output_dir / "sensitivity_results.csv"
+    if sentinel.exists() and not args.overwrite:
+        raise FileExistsError(
+            f"{sentinel} already exists; use --overwrite or another --output-dir"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     base_team = TeamConfig()
-
-    sweep = {
-        "alpha": args.alpha or DEFAULT_SWEEP["alpha"],
-        "planning_horizon": args.planning_horizon or DEFAULT_SWEEP["planning_horizon"],
-        "depot_bias": args.depot_bias or DEFAULT_SWEEP["depot_bias"],
-        "bridge_bfi_range": args.bridge_bfi_range or DEFAULT_SWEEP["bridge_bfi_range"],
-        "base_cost_scale": args.base_cost_scale or DEFAULT_SWEEP["base_cost_scale"],
-        "delta_functionality_scale": args.delta_functionality_scale
-        or DEFAULT_SWEEP["delta_functionality_scale"],
-        "seed": args.seed or DEFAULT_SWEEP["seed"],
+    graph_config = GraphConfig(
+        n_cities=args.cities,
+        seed=args.seed,
+        depot_bias=args.depot_bias,
+        bridge_count_range=args.bridge_count_range,
+        bridge_bfi_range=args.bfi_range,
+        bridge_start_range=args.start_range,
+        bridge_due_offset_range=args.due_offset_range,
+    )
+    base_graph = build_graph(graph_config, base_team)
+    if args.depots is not None:
+        force_city_depots(base_graph, args.depots)
+    scenarios = {
+        scenario.name: scenario
+        for scenario in manuscript_scenarios(base_graph, base_team)
     }
-    rows: List[Dict[str, float | int | str]] = []
-
-    keys = [
-        "alpha",
-        "planning_horizon",
-        "depot_bias",
-        "bridge_bfi_range",
-        "base_cost_scale",
-        "delta_functionality_scale",
-        "seed",
-    ]
-    values = [sweep[key] for key in keys]
-
-    for (
-        alpha,
-        planning_horizon,
-        depot_bias,
-        bridge_bfi_range,
-        base_cost_scale,
-        delta_scale,
-        seed,
-    ) in itertools.product(*values):
-        team_config = _scaled_team_config(
-            base_team, base_cost_scale, delta_scale, alpha
+    solver_config = SolverConfig(
+        time_limit=args.time_limit,
+        mip_gap=args.mip_gap,
+        threads=args.threads,
+        seed=args.gurobi_seed,
+        log_to_console=True,
+    )
+    rows: list[dict[str, Any]] = []
+    failures = 0
+    for name in args.scenarios:
+        scenario = scenarios[name]
+        scenario_dir = output_dir / name
+        scenario_dir.mkdir(parents=True, exist_ok=True)
+        (scenario_dir / "scenario_input.json").write_text(
+            json.dumps(_scenario_payload(scenario, graph_config), indent=2, sort_keys=True)
+            + "\n"
         )
-        graph_config = GraphConfig(
-            n_cities=args.cities,
-            seed=seed,
-            depot_bias=depot_bias,
-            bridge_bfi_range=bridge_bfi_range,
-        )
-        G = build_graph(graph_config, team_config)
-        shortest_paths = compute_shortest_paths(G)
+        shortest_paths = compute_shortest_paths(scenario.graph)
         artifacts, objectives = build_model(
-            G, shortest_paths, team_config, planning_horizon=planning_horizon
+            scenario.graph,
+            shortest_paths,
+            scenario.team_config,
+            planning_horizon=args.planning_horizon,
         )
-
-        artifacts.model.setObjective(
-            (objectives.resilience + objectives.resilience_raw)
-            / objectives.bridges_count
-        )
-        artifacts.model.optimize()
-
-        status = artifacts.model.Status
-        if status == GRB.INFEASIBLE:
-            rows.append(
+        artifacts.model.update()
+        row: dict[str, Any] = {
+            "scenario": name,
+            "description": scenario.description,
+            "cities": args.cities,
+            "bridges": objectives.bridges_count,
+            "depots": len(artifacts.depots),
+            "planning_horizon": args.planning_horizon,
+            "binary_variables": artifacts.model.NumBinVars,
+            "continuous_variables": artifacts.model.NumVars - artifacts.model.NumIntVars,
+            "constraints": artifacts.model.NumConstrs,
+            "status": "MODEL_STATS_ONLY" if args.model_stats_only else "NOT_STARTED",
+            "solution_count": "",
+            "objective_sense": "maximize",
+            "final_network_functionality": "",
+            "restoration_cost_thousand_usd": "",
+            "restored_bridges": "",
+            "runtime_seconds": "",
+            "best_bound": "",
+            "gap_percent": "",
+            "error": "",
+        }
+        if args.write_lp:
+            artifacts.model.setObjective(objectives.final_functionality, GRB.MAXIMIZE)
+            artifacts.model.write(str(scenario_dir / "model.lp"))
+        if not args.model_stats_only:
+            record = solve_maximum_functionality(
+                artifacts.model,
+                objectives,
+                solver_config,
+                scenario_dir / "gurobi.log",
+            )
+            row.update(
                 {
-                    "alpha": alpha,
-                    "planning_horizon": planning_horizon,
-                    "depot_bias": depot_bias,
-                    "bridge_bfi_low": bridge_bfi_range[0],
-                    "bridge_bfi_high": bridge_bfi_range[1],
-                    "base_cost_scale": base_cost_scale,
-                    "delta_functionality_scale": delta_scale,
-                    "seed": seed,
-                    "objective": "",
-                    "cost": "",
-                    "resilience": "",
-                    "visited_bridges": "",
-                    "status": "infeasible",
+                    "status": record.status,
+                    "solution_count": record.solution_count,
+                    "runtime_seconds": record.runtime_seconds or "",
+                    "best_bound": record.best_bound if record.best_bound is not None else "",
+                    "gap_percent": record.gap_percent if record.gap_percent is not None else "",
+                    "error": record.error or "",
                 }
             )
-            continue
-
-        if status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            rows.append(
-                {
-                    "alpha": alpha,
-                    "planning_horizon": planning_horizon,
-                    "depot_bias": depot_bias,
-                    "bridge_bfi_low": bridge_bfi_range[0],
-                    "bridge_bfi_high": bridge_bfi_range[1],
-                    "base_cost_scale": base_cost_scale,
-                    "delta_functionality_scale": delta_scale,
-                    "seed": seed,
-                    "objective": "",
-                    "cost": "",
-                    "resilience": "",
-                    "visited_bridges": "",
-                    "status": f"status_{status}",
-                }
+            (scenario_dir / "solve_record.json").write_text(
+                json.dumps(record.to_dict(), indent=2, sort_keys=True) + "\n"
             )
-            continue
+            if record.has_incumbent:
+                solution = extract_solution(
+                    scenario.graph, artifacts, objectives, scenario.team_config
+                )
+                profile = cumulative_profile(
+                    scenario.graph, solution.schedule, args.planning_horizon
+                )
+                row.update(
+                    {
+                        "final_network_functionality": solution.final_functionality,
+                        "restoration_cost_thousand_usd": solution.cost,
+                        "restored_bridges": solution.visited_bridges,
+                    }
+                )
+                write_csv(
+                    scenario_dir / "solution_schedule.csv",
+                    [item.to_dict() for item in solution.schedule],
+                )
+                write_csv(
+                    scenario_dir / "cumulative_profile.csv",
+                    [item.to_dict() for item in profile],
+                )
+                save_figure(
+                    plot_gantt(solution.schedule, TEAM_COLORS), scenario_dir, "gantt"
+                )
+                save_figure(
+                    plot_cumulative_profile(profile),
+                    scenario_dir,
+                    "cumulative_profile",
+                )
+            else:
+                failures += 1
+        rows.append(row)
+        artifacts.model.dispose()
+        write_csv(sentinel, rows)
+        print(f"{name}: {row['status']}")
 
-        solution = extract_solution(G, artifacts, objectives, team_config)
-        rows.append(
-            {
-                "alpha": alpha,
-                "planning_horizon": planning_horizon,
-                "depot_bias": depot_bias,
-                "bridge_bfi_low": bridge_bfi_range[0],
-                "bridge_bfi_high": bridge_bfi_range[1],
-                "base_cost_scale": base_cost_scale,
-                "delta_functionality_scale": delta_scale,
-                "seed": seed,
-                "objective": round(solution.objective, 6),
-                "cost": round(solution.cost, 6),
-                "resilience": round(solution.resilience, 6),
-                "visited_bridges": solution.visited_bridges,
-                "status": "optimal",
-            }
-        )
-
-    csv_path = output_dir / "sensitivity_results.csv"
-    _write_csv(rows, csv_path)
-
-    for param in [
-        "alpha",
-        "planning_horizon",
-        "depot_bias",
-        "bridge_bfi_low",
-        "bridge_bfi_high",
-        "base_cost_scale",
-        "delta_functionality_scale",
-    ]:
-        _plot_metric_by_param(rows, param, "resilience", output_dir)
-        _plot_metric_by_param(rows, param, "cost", output_dir)
-        _plot_metric_boxplot(rows, param, "resilience", output_dir)
-        _plot_metric_boxplot(rows, param, "cost", output_dir)
-
-    _plot_metric_histogram(rows, "resilience", output_dir)
-    _plot_metric_histogram(rows, "cost", output_dir)
-
-    print(f"Saved {len(rows)} rows to {csv_path}")
+    metadata = {
+        **runtime_metadata(PROJECT_ROOT),
+        "interpretation": (
+            "The default seed-2, six-city network and its reported outputs are one "
+            "manuscript presentation case within this parameterized workflow."
+        ),
+        "graph_config": asdict(graph_config),
+        "planning_horizon": args.planning_horizon,
+        "selected_scenarios": args.scenarios,
+        "solver_config": asdict(solver_config),
+        "model_stats_only": args.model_stats_only,
+    }
+    (output_dir / "experiment_metadata.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n"
+    )
+    print(f"Wrote {len(rows)} scenario records to {sentinel}")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

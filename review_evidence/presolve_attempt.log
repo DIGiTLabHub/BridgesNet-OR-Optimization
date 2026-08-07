@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "src/gurobipy/_model.pyx", line 2586, in gurobipy._model.Model.presolve
+gurobipy._exception.GurobiError: Model too large for size-limited license; visit https://gurobi.com/unrestricted for more information
+ERROR conda.cli.main_run:execute(148): `conda run python -c import sys; sys.path.insert(0,"src"); from bridgesnet.config import TeamConfig,GraphConfig; from bridgesnet.graph import build_graph; from bridgesnet.paths import compute_shortest_paths; from bridgesnet.model import build_model; tc=TeamConfig(); g=build_graph(GraphConfig(),tc); a,o=build_model(g,compute_shortest_paths(g),tc); a.model.update(); p=a.model.presolve(); print(p.NumConstrs,p.NumVars)` failed. (See above for error)
+Restricted license - for non-production use only - expires 2027-11-29
+Gurobi Optimizer version 13.0.1 build v13.0.1rc0 (mac64[arm] - Darwin 23.6.0 23G93)
+
+CPU model: Apple M1 Max
+Thread count: 10 physical cores, 10 logical processors, using up to 10 threads
+

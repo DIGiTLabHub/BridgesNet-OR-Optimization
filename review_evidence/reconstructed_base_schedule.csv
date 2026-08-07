@@ -1,0 +1,14 @@
+bridge,depot,team,route_position,start_day,completion_day,initial_bfi,restored_bfi,cost_usd,provenance
+BC1C20,C1,ERT,1,2.0,3.0,0.32,0.87,2680,reconstructed from manuscript and Fig. 4; not solver-certified
+BC1C60,C1,ERT,2,4.0,5.0,0.40,0.95,2600,reconstructed from manuscript and Fig. 4; not solver-certified
+BC4C60,C1,RRU,1,2.0,3.0,0.39,0.69,1300,reconstructed from manuscript and Fig. 4; not solver-certified
+BC2C50,C1,RRU,2,4.0,5.0,0.26,0.56,1370,reconstructed from manuscript and Fig. 4; not solver-certified
+BC4C50,C1,CIRS,1,3.0,4.0,0.24,0.99,6900,reconstructed from manuscript and Fig. 4; not solver-certified
+BC2C30,C1,CIRS,2,5.0,6.0,0.26,1.00,6850,reconstructed from manuscript and Fig. 4; not solver-certified
+BC3C50,C2,ERT,1,3.0,4.0,0.35,0.90,2650,reconstructed from manuscript and Fig. 4; not solver-certified
+BC1C30,C2,ERT,2,5.0,6.0,0.39,0.94,2610,reconstructed from manuscript and Fig. 4; not solver-certified
+BC2C60,C2,RRU,1,2.0,3.0,0.35,0.65,1320,reconstructed from manuscript and Fig. 4; not solver-certified
+BC1C50,C2,RRU,2,4.0,5.0,0.30,0.60,1350,reconstructed from manuscript and Fig. 4; not solver-certified
+BC3C40,C2,CIRS,1,2.0,3.0,0.25,1.00,6880,reconstructed from manuscript and Fig. 4; not solver-certified
+BC1C40,C2,CIRS,2,4.0,5.0,0.23,0.98,6920,reconstructed from manuscript and Fig. 4; not solver-certified
+BC2C40,C2,CIRS,3,6.0,7.0,0.35,1.00,6620,reconstructed from manuscript and Fig. 4; not solver-certified

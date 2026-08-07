@@ -1,0 +1,5 @@
+bridges,cities,total_nodes,depots,teams_per_depot,time_points,candidate_directed_arcs,binary_variables,continuous_variables,total_variables,constraints,nonzeros,depot_nodes
+15,6,21,2,3,8,420,3240,90,3330,3177,12150,C1;C2
+30,6,36,2,3,8,1260,9000,180,9180,9042,37800,C1;C2
+45,6,51,3,3,8,2550,26190,405,26595,26793,116235,C1;C2;C3
+60,6,66,4,3,8,4290,57240,720,57960,59124,262080,C1;C2;C3;C4

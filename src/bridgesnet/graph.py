@@ -24,6 +24,18 @@ def list_cities(G: nx.DiGraph) -> List[str]:
     return [node for node in G.nodes() if str(node).startswith("C")]
 
 
+def force_city_depots(G: nx.DiGraph, depot_count: int) -> List[str]:
+    """Select the first configured number of city nodes as depots."""
+
+    cities = list_cities(G)
+    if not 1 <= depot_count <= len(cities):
+        raise ValueError(f"depot_count must be between 1 and {len(cities)}")
+    depots = cities[:depot_count]
+    for city in cities:
+        G.nodes[city]["Depot"] = int(city in depots)
+    return depots
+
+
 def build_graph(config: GraphConfig, team_config: TeamConfig) -> nx.DiGraph:
     """Build a synthetic bridge network with node and edge attributes."""
 

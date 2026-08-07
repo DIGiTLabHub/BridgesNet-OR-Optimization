@@ -4,7 +4,7 @@ BridgesNet studies how to recover a damaged bridge network when repair capacity 
 
 The codebase contains two connected workflows:
 
-- a **synthetic bridge-network workflow** for controlled optimization experiments, Pareto analysis, and sensitivity studies;
+- a **parameterized synthetic bridge-network workflow** for controlled optimization experiments, Pareto analysis, named manuscript cases, and scalability studies;
 - a **Missouri bridge-data workflow** for constructing a directed network from repository-hosted bridge graph and workbook files.
 
 ## Why this project matters
@@ -24,10 +24,29 @@ At a high level, the synthetic workflow does the following:
 
 1. **Abstract the system as a directed graph.** Cities, depots, and bridge nodes are represented in a network with edge travel times and node-level bridge attributes.
 2. **Model heterogeneous repair teams.** Team types (`RRU`, `ERT`, `CIRS`) differ in intervention cost and the amount of bridge functionality they restore.
-3. **Respect timing constraints.** Each bridge has a service window, each team has service time, and route timing is tracked through service-start variables and time-window constraints.
+3. **Respect timing constraints.** Each bridge has an earliest start and due date, each team has a service duration, and route timing is tracked through service-start and completion variables.
 4. **Use shortest-path travel times.** Network shortest paths are computed first, then used inside the optimization model to propagate feasible arrival and service times.
 5. **Solve an exact MILP.** The resulting formulation is a bridge-recovery version of a **multi-depot vehicle-routing problem with time windows**, implemented as a Gurobi mixed-integer linear program.
-6. **Explore trade-offs.** The project supports **Pareto frontier generation** using an epsilon-constraint approach and broader **sensitivity analysis** over planning and cost/functionality parameters.
+6. **Explore trade-offs.** The project supports an evidence-exporting **epsilon-constraint Pareto frontier**, named sensitivity cases, and replicated scalability experiments.
+
+The six-city, seed-2 network and its parameter values are the case used to
+present the method in the manuscript. They are **one configuration**, not a
+hard-coded definition of the method. The command-line interfaces retain city
+count, random seed, planning horizon, graph ranges, scenario selection, and
+solver settings as parameters so other controlled network configurations can
+be evaluated without rewriting the model.
+
+Use `--depots D` to force `C1` through `CD` to be depots for exact cross-seed
+comparisons. If it is omitted, the historical seeded depot-selection rule is
+preserved so the default manuscript case remains unchanged.
+
+In the current formulation, one `RRU`, one `ERT`, and one `CIRS` team are
+available at every depot, and every depot-team pair is required to depart and
+return exactly once. Thus, team deployment is mandatory rather than optional.
+The model routes over a complete shortest-path metric closure while retaining
+the generated graph as the physical travel network. These choices are kept
+explicit because changing either would alter the manuscript formulation and
+reported model dimensions.
 
 Core implementation modules live under `src/bridgesnet/`:
 
@@ -38,6 +57,8 @@ Core implementation modules live under `src/bridgesnet/`:
 - `pareto.py` — Pareto frontier generation
 - `plots.py` — network, route, gantt, and summary figures
 - `results.py` — solution extraction
+- `scenarios.py` — isolated named manuscript sensitivity cases
+- `solver.py` — shared explicit objective sense, solver settings, and status evidence
 
 ## Repository figures
 
@@ -77,6 +98,30 @@ The environment includes:
 - `numpy`
 - `pytest`
 
+### Handoff environment validation
+
+As part of the repository handoff, the Conda environment definition will be
+added or refreshed by the receiving maintainer and the code will be tested in
+that newly created environment. This independent environment validation is
+still pending; the current results were obtained from the existing local
+`bridgesnet` environment.
+
+The handoff check should run:
+
+```bash
+conda env create -f environment.yml
+conda run -n bridgesnet python scripts/run_tests.py
+conda run -n bridgesnet python scripts/run_sensitivity_analysis.py \
+  --model-stats-only --output-dir results/handoff-sensitivity-check
+conda run -n bridgesnet python scripts/run_sensitivity_analysis_scalability.py \
+  --model-stats-only --replications 1 \
+  --output-dir results/handoff-scalability-check
+```
+
+Record the operating system, package versions, Gurobi version/license type,
+test result, and any environment-file changes in the handoff commit. Full
+optimization remains dependent on an adequate Gurobi license.
+
 ## Gurobi license setup
 
 The optimization scripts require a valid Gurobi license.
@@ -114,50 +159,115 @@ Key outputs:
 
 ### Run the core optimization analysis
 
-This is the main end-to-end synthetic experiment: build the graph, compute shortest paths, solve the Gurobi model, and save the network, routes, gantt chart, and optional Pareto figure.
+This is the main end-to-end experiment: generate one configured graph, compute
+shortest paths, explicitly maximize final network functionality, and export
+both manuscript figures and machine-readable solver evidence.
 
 ```bash
-python scripts/run_analysis.py --cities 6 --seed 2 --planning-horizon 8 --output-dir results --pareto
+python scripts/run_analysis.py \
+  --cities 6 --seed 2 --planning-horizon 8 \
+  --output-dir results/analysis --pareto
 ```
 
 If you also want the LP written to disk:
 
 ```bash
-python scripts/run_analysis.py --cities 6 --seed 2 --planning-horizon 8 --output-dir results --pareto --write-lp
+python scripts/run_analysis.py \
+  --cities 6 --seed 2 --planning-horizon 8 \
+  --time-limit 3600 --mip-gap 0.0001 --threads 10 \
+  --output-dir results/analysis --pareto --write-lp
 ```
 
-Key outputs in `results/`:
+Key outputs in `results/analysis/`:
 
 - `network.png` and `network.pdf`
 - `routes.png` and `routes.pdf`
 - `gantt.png` and `gantt.pdf`
+- `cumulative_profile.png`, `cumulative_profile.pdf`, and `cumulative_profile.csv`
+- `instance.json`, `model_statistics.json`, and `solve_record.json`
+- `solution_summary.json` and `solution_schedule.csv`
+- `gurobi_primary.log`
 - `pareto.png` and `pareto.pdf` when `--pareto` is used
+- `pareto_subproblems.csv`, filtered `pareto_points.csv`, `pareto_endpoints.json`, and `pareto_logs/`
 - `bridge.lp` when `--write-lp` is used
 
-The script also prints the solved objective, cost, resilience, and visited-bridge count.
+The process exits nonzero if no incumbent is available. A time-limited incumbent
+is still exported with its bound and final gap; it is not mislabeled as optimal.
 
-### Run sensitivity analysis sweeps
+### Run the named manuscript sensitivity cases
 
-Use this script to sweep parameter combinations and summarize how resilience and cost respond to planning assumptions.
+This driver creates the base graph once and applies each sensitivity change to
+a copy. Consequently, changes in results are attributable to the named
+parameter rather than to regeneration of the random network. The four default
+cases are the base case, service durations `(1,2,2)`, all due dates minus one
+day, and all initial BFI values plus `0.10` (with derived cost and post-service
+BFI recomputed).
 
-Default sweep:
+Run the manuscript configuration:
 
 ```bash
-python scripts/run_sensitivity_analysis.py
+python scripts/run_sensitivity_analysis.py \
+  --cities 6 --seed 2 --planning-horizon 8 \
+  --output-dir results/sensitivity
 ```
 
-Example custom sweep:
+Run selected cases on another parameterized configuration:
 
 ```bash
-python scripts/run_sensitivity_analysis.py --output-dir results/sensitivity --cities 6 --alpha 0.2,0.4,0.6 --planning-horizon 6,8,10 --depot-bias 0.6,0.8 --bridge-bfi-range 0.1:0.3,0.2:0.4 --base-cost-scale 0.9,1.0,1.1 --delta-functionality-scale 0.9,1.0,1.1 --seed 1,2
+python scripts/run_sensitivity_analysis.py \
+  --cities 7 --seed 14 --planning-horizon 10 \
+  --depots 2 \
+  --bridge-count-range 1:2 --bfi-range 0.15:0.45 \
+  --start-range 0:3 --due-offset-range 2:6 \
+  --scenarios base,due_minus_1 \
+  --output-dir results/sensitivity-custom
+```
+
+To validate all instances and counts without solving:
+
+```bash
+python scripts/run_sensitivity_analysis.py \
+  --model-stats-only --output-dir results/sensitivity-stats
 ```
 
 Key outputs in `results/sensitivity/`:
 
 - `sensitivity_results.csv`
-- `summary_*.(png|pdf)` plots
-- `box_*.(png|pdf)` plots
-- `hist_*.(png|pdf)` plots
+- `experiment_metadata.json`
+- one folder per scenario containing `scenario_input.json`, `solve_record.json`,
+  the Gurobi log, schedule/profile CSVs, and duration-aware figures
+
+### Run the replicated scalability experiment
+
+The scalability driver creates exact 15-, 30-, 45-, and 60-bridge synthetic
+instances, runs replicated maximum-functionality MILPs, and records the model
+sizes, solver logs, instances, runtimes, bounds, and optimality gaps.
+
+```bash
+python scripts/run_sensitivity_analysis_scalability.py
+```
+
+The default protocol uses 10 replications per size, a one-hour limit per solve,
+10 Gurobi threads, and a relative MIP gap target of `1e-4`. Each runtime covers
+one maximum-final-functionality problem, not the complete Pareto procedure.
+It uses the same shared solver path and explicit `GRB.MAXIMIZE` objective as the
+main and named-sensitivity drivers.
+
+To verify instance generation and model sizes without optimizing:
+
+```bash
+python scripts/run_sensitivity_analysis_scalability.py \
+  --model-stats-only --replications 1 \
+  --output-dir results/scalability-stats
+```
+
+Key outputs include:
+
+- `scalability_runs.csv` — one row per replication
+- `scalability_summary.csv` and `scalability_table.md` — aggregate results
+- `experiment_metadata.json` — protocol, versions, seeds, and solver settings
+- `instances/` — complete generated input snapshots with SHA-256 identifiers
+- `logs/` — one Gurobi log per attempted solve
 
 ### Create a Missouri bridge network from repository data
 
@@ -203,6 +313,14 @@ This wrapper runs:
 python -m pytest tests
 ```
 
+The tests include a small Gurobi optimization that fits a restricted license,
+plus regression checks for objective sense, earliest-start enforcement,
+scenario isolation, model dimensions, Pareto evidence, cumulative outputs, and
+service-duration plotting. The default manuscript model before presolve contains
+3,240 binary variables, 90 continuous variables, and 3,267 constraints. The
+constraint count is 90 larger than the historical notebook translation because
+the manuscript earliest-start equation is now implemented.
+
 ## Project structure
 
 - `scripts/` — runnable entry points for visualization, optimization, sensitivity, Missouri data processing, and tests
@@ -212,4 +330,4 @@ python -m pytest tests
 
 ## What this README does and does not claim
 
-This repository provides a reproducible optimization and analysis workflow for bridge-network recovery planning. It demonstrates graph-based modeling, team heterogeneity, route-and-time feasibility, Pareto trade-offs, and parameter sensitivity. It does **not** claim field deployment or external validation beyond the scripts, datasets, and outputs present in this repository.
+This repository provides a reproducible optimization and analysis workflow for bridge-network recovery planning. It demonstrates graph-based modeling, team heterogeneity, route-and-time feasibility, Pareto trade-offs, and parameter sensitivity. Historical manuscript figures and numbers are illustrative until regenerated with the corrected runners and retained solver records. The repository does **not** claim field deployment or external validation beyond the scripts, datasets, and outputs present here.

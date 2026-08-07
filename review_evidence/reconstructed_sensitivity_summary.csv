@@ -1,0 +1,4 @@
+scenario,bridges_in_figure,recalculated_cost_usd,recalculated_final_functionality,solver_status,runtime_seconds,gap_percent,provenance
+service_time_1_2_2,9,25770,0.594667,not available,,,figure reconstruction and authoritative input formulas; not solver-certified
+latest_completion_minus_1,11,42090,0.727333,not available,,,figure reconstruction and authoritative input formulas; not solver-certified
+initial_bfi_plus_0_10,13,48310,0.860000,not available,,,figure reconstruction and authoritative input formulas; not solver-certified

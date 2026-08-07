@@ -1,0 +1,9 @@
+time_day,bridges_completed,incremental_functionality,cumulative_functionality,incremental_cost_usd,cumulative_cost_usd,provenance
+0,,0.000000,0.322000,0,0,derived from reconstructed_base_schedule.csv; not solver-certified
+1,,0.000000,0.322000,0,0,derived from reconstructed_base_schedule.csv; not solver-certified
+2,,0.000000,0.322000,0,0,derived from reconstructed_base_schedule.csv; not solver-certified
+3,BC1C20;BC4C60;BC2C60;BC3C40,0.126667,0.448667,12180,12180,derived from reconstructed_base_schedule.csv; not solver-certified
+4,BC4C50;BC3C50,0.086667,0.535333,9550,21730,derived from reconstructed_base_schedule.csv; not solver-certified
+5,BC1C60;BC2C50;BC1C50;BC1C40,0.126667,0.662000,12240,33970,derived from reconstructed_base_schedule.csv; not solver-certified
+6,BC2C30;BC1C30,0.086000,0.748000,9460,43430,derived from reconstructed_base_schedule.csv; not solver-certified
+7,BC2C40,0.043333,0.791333,6620,50050,derived from reconstructed_base_schedule.csv; not solver-certified

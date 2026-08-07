@@ -1,0 +1,28 @@
+/Users/chenzhiq/.matplotlib is not a writable directory
+Matplotlib created a temporary cache directory at /var/folders/jr/gqfwfx0n5dvbjz1r3pgf5cm471yxvj/T/matplotlib-9oxznt6h because there was an issue with the default path (/Users/chenzhiq/.matplotlib); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/chenzhiq/.cache/fontconfig
+	/Users/chenzhiq/.fontconfig
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/chenzhiq/.cache/fontconfig
+	/Users/chenzhiq/.fontconfig
+2026-08-06 15:51:33.426 system_profiler[13112:3108526] XType: Using static font registry.
+Matplotlib is building the font cache; this may take a moment.
+Traceback (most recent call last):
+  File "/Users/chenzhiq/MyGitProjects/BridgesNet-OR-Optimization/scripts/run_analysis.py", line 116, in <module>
+    main()
+  File "/Users/chenzhiq/MyGitProjects/BridgesNet-OR-Optimization/scripts/run_analysis.py", line 72, in main
+    artifacts.model.optimize()
+  File "src/gurobipy/_model.pyx", line 926, in gurobipy._model.Model.optimize
+gurobipy._exception.GurobiError: Model too large for size-limited license; visit https://gurobi.com/unrestricted for more information
+ERROR conda.cli.main_run:execute(148): `conda run python scripts/run_analysis.py --cities 6 --seed 2 --planning-horizon 8 --output-dir /private/tmp/bridgesnet-review-baseline --pareto --write-lp` failed. (See above for error)
+Restricted license - for non-production use only - expires 2027-11-29
+Gurobi Optimizer version 13.0.1 build v13.0.1rc0 (mac64[arm] - Darwin 23.6.0 23G93)
+
+CPU model: Apple M1 Max
+Thread count: 10 physical cores, 10 logical processors, using up to 10 threads
+

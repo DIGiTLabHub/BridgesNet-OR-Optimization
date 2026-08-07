@@ -30,6 +30,12 @@ class ObjectiveExpressions:
     cost: gp.LinExpr
     bridges_count: int
 
+    @property
+    def final_functionality(self) -> gp.LinExpr:
+        """Average bridge functionality at the end of the planning horizon."""
+
+        return (self.resilience + self.resilience_raw) / self.bridges_count
+
 
 def _validate_paths(shortest_paths: Dict[Tuple[str, str], Tuple[list | None, float]]) -> None:
     for (i, j), (_, travel_time) in shortest_paths.items():
@@ -46,6 +52,23 @@ def build_model(
 ) -> Tuple[ModelArtifacts, ObjectiveExpressions]:
     """Create the optimization model and key expressions."""
 
+    if planning_horizon <= 0:
+        raise ValueError("planning_horizon must be positive")
+    if big_m <= 0:
+        raise ValueError("big_m must be positive")
+    if not team_config.teams:
+        raise ValueError("At least one team type is required")
+    for mapping_name, mapping in (
+        ("base_cost", team_config.base_cost),
+        ("delta_functionality", team_config.delta_functionality),
+        ("service_time", team_config.service_time),
+    ):
+        missing = set(team_config.teams) - set(mapping)
+        if missing:
+            raise ValueError(f"{mapping_name} is missing teams: {sorted(missing)}")
+    if any(team_config.service_time[team] < 0 for team in team_config.teams):
+        raise ValueError("service times must be nonnegative")
+
     _validate_paths(shortest_paths)
     bridges = list_bridges(G)
     if not bridges:
@@ -58,6 +81,25 @@ def build_model(
     pair_dk = [(d, k) for d in depots for k in team_config.teams]
     if not pair_dk:
         raise ValueError("No depot-team pairs generated")
+
+    for bridge in bridges:
+        attributes = G.nodes[bridge]
+        missing = {"Start", "Due", "BFI", "cost", "NewBFI"} - set(attributes)
+        if missing:
+            raise ValueError(f"Bridge {bridge} is missing attributes: {sorted(missing)}")
+        if attributes["Start"] > attributes["Due"]:
+            raise ValueError(f"Bridge {bridge} has Start greater than Due")
+        if not 0 <= attributes["BFI"] <= 1:
+            raise ValueError(f"Bridge {bridge} has BFI outside [0, 1]")
+        for team in team_config.teams:
+            if team not in attributes["cost"] or team not in attributes["NewBFI"]:
+                raise ValueError(f"Bridge {bridge} lacks cost/NewBFI for team {team}")
+            if attributes["cost"][team] < 0:
+                raise ValueError(f"Bridge {bridge} has negative cost for team {team}")
+            if not 0 <= attributes["NewBFI"][team] <= 1:
+                raise ValueError(
+                    f"Bridge {bridge} has NewBFI outside [0, 1] for team {team}"
+                )
 
     m = gp.Model("BIM")
 
@@ -161,12 +203,23 @@ def build_model(
         name="y_s_L",
     )
 
-    # Propagate start times along chosen arcs using shortest travel times.
+    # Enforce the bridge availability date (manuscript Eq. 13).
+    m.addConstrs(
+        (
+            s[i, dk] >= G.nodes[i]["Start"]
+            for i in bridges
+            for dk in pair_dk
+        ),
+        name="Earliest_Start",
+    )
+
+    # Propagate start times along chosen arcs using shortest travel times.  A
+    # depot has no intervention duration; bridge predecessors do.
     m.addConstrs(
         (
             s[j, dk]
             >= (s[i, dk] if str(i).startswith("B") else 0)
-            + team_config.service_time[dk[1]]
+            + (team_config.service_time[dk[1]] if str(i).startswith("B") else 0)
             + shortest_paths[(i, j)][1] / 24
             - big_m * (1 - x[i, j, dk])
             for i in G.nodes()

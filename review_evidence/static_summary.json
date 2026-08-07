@@ -1,0 +1,80 @@
+{
+  "python": "3.11.15 | packaged by conda-forge | (main, Mar  5 2026, 16:59:26) [Clang 19.1.7 ]",
+  "platform": "macOS-14.6.1-arm64-arm-64bit",
+  "gurobi": [
+    13,
+    0,
+    1
+  ],
+  "networkx": "3.6.1",
+  "numpy": "2.4.3",
+  "matplotlib": "3.10.8",
+  "base_case": {
+    "nodes": 21,
+    "cities": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6"
+    ],
+    "bridges": [
+      "BC1C20",
+      "BC1C30",
+      "BC1C40",
+      "BC1C50",
+      "BC1C60",
+      "BC2C30",
+      "BC2C40",
+      "BC2C50",
+      "BC2C60",
+      "BC3C40",
+      "BC3C50",
+      "BC3C60",
+      "BC4C50",
+      "BC4C60",
+      "BC5C60"
+    ],
+    "depots": [
+      "C1",
+      "C2"
+    ],
+    "teams": [
+      "RRU",
+      "ERT",
+      "CIRS"
+    ],
+    "time_points": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "x_variables": 2520,
+    "y_variables": 720,
+    "s_variables": 90,
+    "NumVars": 3330,
+    "NumBinVars": 3240,
+    "NumIntVars": 3240,
+    "NumConstrs": 3177,
+    "NumNZs": 12150,
+    "average_initial_bfi": 0.32199999999999995
+  },
+  "gurobi_parameters": {
+    "ModelSense_after_build": 1,
+    "Threads": 0,
+    "TimeLimit": "inf",
+    "Seed": 0,
+    "MIPGap": 0.0001,
+    "MIPGapAbs": 1e-10,
+    "FeasibilityTol": 1e-06,
+    "IntFeasTol": 1e-05,
+    "OptimalityTol": 1e-06
+  },
+  "reduced_deadline_windows_valid": true
+}
